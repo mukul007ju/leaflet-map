@@ -5,7 +5,7 @@
 
 const SUPABASE_URL = "https://ldkfpvmwmhooqgprgoxs.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxka2Zwdm13bWhvb3FncHJnb3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NTM0OTMsImV4cCI6MjA5MzMyOTQ5M30.noPI1ixmtugFRNuLZkhYFiA_pvxWc-iHrtgJeejCarY";
-const TABLE = "island_masterplan_wgs";
+const TABLE = "canada_plot_wgs";
 
 
 /* =========================================================
@@ -33,13 +33,14 @@ let initialBounds = null;
 let initialData = [];
 
 let usedLabelPositions = [];
+let queryConditions = [];
 
 
 /* =========================================================
    MAP INITIALIZATION
 ========================================================= */
 
-const map = L.map("map").setView([47.8, 13.04], 12);
+const map = L.map("map").setView([24.87,  91.85], 12);
 
 
 /* =========================================================
@@ -47,7 +48,7 @@ const map = L.map("map").setView([47.8, 13.04], 12);
 ========================================================= */
 
 const defaultView = {
-    center: [47.8, 13.04],
+    center: [24.87,  91.85],
     zoom: 12
 };
 
@@ -142,6 +143,25 @@ async function loadData() {
 
 loadData();
 
+/* =========================================================
+   FEATURE COUNT (QUERY TOOL)
+========================================================= */
+
+function updateFeatureCount(selected, total) {
+
+    const el = document.getElementById("featureCount");
+
+    if (!el) {
+        console.log("featureCount div NOT found");
+        return;
+    }
+
+    el.innerHTML = `${selected} Selected of ${total} Features`;
+
+    console.log("Counter updated:", selected, total);
+}
+
+
 
 /* =========================================================
    COLUMN LOADING (QUERY TOOL)
@@ -154,32 +174,160 @@ function loadColumns(data) {
     col.innerHTML = "";
 
     Object.keys(data[0]).forEach(k => {
+
         if (k !== "geom") {
+
             let opt = document.createElement("option");
+
             opt.value = k;
-            opt.textContent = k;
+
+            opt.textContent = k
+                .replace(/_/g, " ")
+                .toUpperCase();
+
             col.appendChild(opt);
         }
     });
 }
 
 
+
+
 /* =========================================================
-   QUERY TOOL
+   ADVANCED QUERY BUILDER
 ========================================================= */
 
-document.getElementById("queryBtn").addEventListener("click", function () {
+document.getElementById("addQueryBtn")
+.addEventListener("click", function () {
 
-    const column = document.getElementById("columnSelect").value;
-    const value = document.getElementById("searchBox").value;
+    const column =
+        document.getElementById("columnSelect").value;
 
-    filteredData = allData.filter(r =>
-        r[column] && r[column].toString().toLowerCase().includes(value.toLowerCase())
-    );
+    const operator =
+        document.getElementById("operatorSelect").value;
+
+    const value =
+        document.getElementById("searchBox").value.trim();
+
+    if (!value) {
+        alert("Enter a value");
+        return;
+    }
+
+    queryConditions.push({
+        column,
+        operator,
+        value
+    });
+
+    displayQueryConditions();
+
+    document.getElementById("searchBox").value = "";
+});
+
+
+document.getElementById("runQueryBtn")
+.addEventListener("click", function () {
+
+    filteredData = allData.filter(row => {
+
+        return queryConditions.every(cond => {
+
+            const val = row[cond.column];
+
+            if (val === null || val === undefined)
+                return false;
+
+            switch (cond.operator) {
+
+                case "=":
+                    return String(val).toLowerCase() ===
+                        cond.value.toLowerCase();
+
+                case "!=":
+                    return String(val).toLowerCase() !==
+                        cond.value.toLowerCase();
+
+                case ">":
+                    return Number(val) >
+                        Number(cond.value);
+
+                case "<":
+                    return Number(val) <
+                        Number(cond.value);
+
+                case ">=":
+                    return Number(val) >=
+                        Number(cond.value);
+
+                case "<=":
+                    return Number(val) <=
+                        Number(cond.value);
+
+                case "contains":
+                default:
+                    return String(val)
+                        .toLowerCase()
+                        .includes(cond.value.toLowerCase());
+            }
+        });
+    });
+
+    clearHighlight();
 
     renderMap(filteredData);
     renderTable(filteredData);
+
+    updateFeatureCount(
+        filteredData.length,
+        allData.length
+    );
 });
+
+
+document.getElementById("clearQueryBtn")
+.addEventListener("click", function () {
+
+    queryConditions = [];
+
+    filteredData = [...allData];
+
+    renderMap(filteredData);
+    renderTable(filteredData);
+
+    updateFeatureCount(
+        filteredData.length,
+        allData.length
+    );
+
+    document.getElementById("activeQueries").innerHTML = "";
+
+    document.getElementById("searchBox").value = "";
+});
+
+
+function displayQueryConditions() {
+
+    const div =
+        document.getElementById("activeQueries");
+
+    if (!div) return;
+
+    let html = "";
+
+    queryConditions.forEach((q, i) => {
+
+        html += `
+        <div>
+            ${i + 1}.
+            ${q.column}
+            ${q.operator}
+            ${q.value}
+        </div>`;
+    });
+
+    div.innerHTML = html;
+}
 
 
 /* =========================================================
@@ -199,29 +347,40 @@ function renderMap(data) {
         }))
     }, {
         style: {
-            color: "#1565c0",
-            weight: 1,
+            color: "#ffeb3b",
+            weight: 0.8,
             fillColor: "#42a5f5",
             fillOpacity: 0.2
         },
 
         onEachFeature: (f, layer) => {
 
-            layer.on("click", () => highlight(f));
+            layer.on("click", () => {
 
-            if (f.properties && f.properties.zones) {
+    const i = filteredData.findIndex(r => r === f.properties);
 
-                const label = L.tooltip({
-                    permanent: true,
-                    direction: "center",
-                    className: "zone-label"
-                }).setContent(f.properties.zones.toString());
+    const feature = {
+        type: "Feature",
+        geometry: f.geometry,
+        properties: f.properties
+    };
 
-                layer.bindTooltip(label);
+    selectFeature(i, feature);
+});
 
-                layer._labelText = f.properties.zones.toString();
-                layer._labelLayer = label;
-            }
+if (f.properties && f.properties.plot_no) {
+
+    const label = L.tooltip({
+        permanent: true,
+        direction: "center",
+        className: "zone-label"
+    }).setContent(f.properties.plot_no.toString());
+
+    layer.bindTooltip(label);
+
+    layer._labelText = f.properties.plot_no.toString();
+    layer._labelLayer = label;
+}
         }
     }).addTo(map);
 
@@ -438,7 +597,7 @@ function renderTable(data) {
 
     table.innerHTML = html;
 
-    addRowClick();
+  
 }
 
 
@@ -446,23 +605,38 @@ function renderTable(data) {
    ROW CLICK
 ========================================================= */
 
-function addRowClick() {
+document.getElementById("table").addEventListener("click", function (e) {
 
-    document.querySelectorAll(".table-row").forEach(row => {
+    const row = e.target.closest(".table-row");
+    if (!row) return;
 
-        row.addEventListener("click", function () {
+    const i = parseInt(row.getAttribute("data-i"));
+    const f = filteredData[i];
 
-            const i = this.getAttribute("data-i");
-            const f = filteredData[i];
-
-            highlight({
-                type: "Feature",
-                geometry: parseGeom(f.geom),
-                properties: f
-            });
-        });
+    // remove old selection
+    document.querySelectorAll(".table-row").forEach(r => {
+        r.classList.remove("selected");
     });
-}
+
+    // select new row
+    row.classList.add("selected");
+
+    // scroll (fast mode)
+    row.scrollIntoView({
+        block: "center",
+        behavior: "auto"
+    });
+
+    const feature = {
+        type: "Feature",
+        geometry: parseGeom(f.geom),
+        properties: f
+    };
+
+    requestAnimationFrame(() => {
+        highlight(feature);
+    });
+});
 
 
 /* =========================================================
@@ -497,6 +671,8 @@ distanceBtn.addEventListener("click", () => {
 
     measureMode = "distance";
 
+    disableFeatureInteraction();   // 👈 ADD THIS
+
     distanceBtn.classList.add("measure-active");
 });
 
@@ -505,6 +681,8 @@ areaBtn.addEventListener("click", () => {
     resetMeasureButtons();
 
     measureMode = "area";
+
+    disableFeatureInteraction();   // 👈 ADD THIS
 
     areaBtn.classList.add("measure-active");
 });
@@ -621,6 +799,9 @@ function clearMeasurements() {
 
     resetMeasureButtons();
 
+    // ✅ RESTORE FEATURE INTERACTION AFTER MEASURE MODE
+    enableFeatureInteraction();
+
     distancePoints = [];
     areaPoints = [];
 
@@ -642,6 +823,15 @@ function clearMeasurements() {
 function resetMapView() {
 
     filteredData = initialData;
+	
+	queryConditions = [];
+
+const activeQueries =
+    document.getElementById("activeQueries");
+
+if (activeQueries) {
+    activeQueries.innerHTML = "";
+}
 
     renderMap(initialData);
     renderTable(initialData);
@@ -663,3 +853,294 @@ function resetMapView() {
 
 document.getElementById("resetMapBtn")
 .addEventListener("click", resetMapView);
+
+clearHighlight();
+
+/* =========================================================
+   CLEAR HIGHLIGHT
+========================================================= */
+
+function clearHighlight() {
+    if (highlightLayer) {
+        map.removeLayer(highlightLayer);
+        highlightLayer = null;
+    }
+    document.getElementById("featureInfo").innerHTML = "";
+}
+
+/* =========================================================
+   DISABLE RIGHTCLICK
+========================================================= */
+
+function clearHighlight() {
+    if (highlightLayer) {
+        map.removeLayer(highlightLayer);
+        highlightLayer = null;
+    }
+    document.getElementById("featureInfo").innerHTML = "";
+	
+	document.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+});
+}
+
+/* =========================================================
+   SELECT FEATURE AND HIGHLIGHT IN ROW
+========================================================= */
+
+let selectedRowIndex = null;
+
+function selectFeature(index, feature) {
+
+    selectedRowIndex = index;
+
+    // clear previous selection
+    document.querySelectorAll(".table-row").forEach(r => {
+        r.classList.remove("selected");
+    });
+
+    const row = document.querySelector(`.table-row[data-i="${index}"]`);
+
+    if (row) {
+        row.classList.add("selected");
+
+        // ✅ SCROLL TO ROW 
+        row.scrollIntoView({
+            behavior: "auto",
+            block: "center"
+        });
+    }
+
+    highlight(feature);
+}
+
+/* =========================================================
+   DISABLE FEATURE SELECTION WHEN MEASURING
+========================================================= */
+
+function disableFeatureInteraction() {
+
+    if (!geoLayer) return;
+
+    geoLayer.eachLayer(layer => {
+        if (layer.getElement) {
+            const el = layer.getElement();
+            if (el) el.style.pointerEvents = "none";
+        }
+
+        // also disable tooltip click interference
+        layer.off("click");
+    });
+}
+
+function enableFeatureInteraction() {
+
+    if (!geoLayer) return;
+
+    geoLayer.eachLayer(layer => {
+
+        if (layer.getElement) {
+            const el = layer.getElement();
+            if (el) el.style.pointerEvents = "auto";
+        }
+
+        // rebind click again safely
+        layer.off("click"); // avoid duplicates
+
+        layer.on("click", () => {
+
+            const i = filteredData.findIndex(r => r === layer.feature.properties);
+
+            const feature = {
+                type: "Feature",
+                geometry: layer.feature.geometry,
+                properties: layer.feature.properties
+            };
+
+            selectFeature(i, feature);
+        });
+    });
+}
+
+
+/* =========================================================
+   EXPORT TABLE (PROFESSIONAL PDF)
+========================================================= */
+
+document.getElementById("exportTablePdfBtn")
+.addEventListener("click", function () {
+
+    const { jsPDF } = window.jspdf;
+
+    const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: "a4"
+    });
+
+    /* =========================================================
+       QUERY TITLE
+    ========================================================= */
+
+    let queryTitle = "All Features";
+
+    if (queryConditions && queryConditions.length > 0) {
+
+        queryTitle = queryConditions
+            .map(q => `${q.column} ${q.operator} ${q.value}`)
+            .join(" AND ");
+    }
+
+    /* =========================================================
+       PREPARE DATA
+    ========================================================= */
+
+    const cleanData = filteredData.map(row => {
+
+        const obj = {};
+
+        Object.keys(row).forEach(key => {
+
+            if (key === "geom") return;
+
+            let value = row[key];
+
+            // limit decimals to 3
+            if (
+                typeof value === "number" &&
+                !Number.isInteger(value)
+            ) {
+                value = Number(value).toFixed(3);
+            }
+
+            obj[key.toUpperCase()] = value;
+        });
+
+        return obj;
+    });
+
+    if (cleanData.length === 0) {
+
+        alert("No records found.");
+
+        return;
+    }
+
+    const columns = Object.keys(cleanData[0]);
+
+    const rows = cleanData.map(row =>
+        columns.map(col => row[col] ?? "")
+    );
+
+    /* =========================================================
+       TABLE
+    ========================================================= */
+
+    pdf.autoTable({
+
+        head: [columns],
+
+        body: rows,
+
+        startY: 32,
+
+        margin: {
+            top: 30,
+            left: 8,
+            right: 8,
+            bottom: 12
+        },
+
+        theme: "grid",
+
+        styles: {
+            fontSize: 7,
+            cellPadding: 1.8,
+            overflow: "linebreak",
+            valign: "middle",
+            textColor: [0, 0, 0]
+        },
+
+        headStyles: {
+            fillColor: [33, 37, 41],
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+            halign: "center",
+            valign: "middle",
+            fontSize: 7
+        },
+
+        alternateRowStyles: {
+            fillColor: [245, 245, 245]
+        },
+
+        didDrawPage: function (data) {
+
+            const pageWidth =
+                pdf.internal.pageSize.getWidth();
+
+            const pageHeight =
+                pdf.internal.pageSize.getHeight();
+
+            /* ===============================
+               HEADER
+            =============================== */
+
+            pdf.setFont("helvetica", "bold");
+            pdf.setFontSize(13);
+
+            pdf.text(
+                "ATTRIBUTE QUERY RESULT",
+                10,
+                10
+            );
+
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(8);
+
+            pdf.text(
+                `QUERY: ${queryTitle}`,
+                10,
+                16
+            );
+
+            pdf.text(
+                `TOTAL FEATURES: ${cleanData.length}`,
+                10,
+                21
+            );
+
+            pdf.line(
+                10,
+                24,
+                pageWidth - 10,
+                24
+            );
+
+            /* ===============================
+               FOOTER
+            =============================== */
+
+            pdf.setFontSize(8);
+
+            pdf.text(
+                `PAGE ${data.pageNumber}`,
+                pageWidth - 25,
+                pageHeight - 6
+            );
+
+            pdf.text(
+                new Date().toLocaleDateString(),
+                10,
+                pageHeight - 6
+            );
+        }
+    });
+
+    /* =========================================================
+       SAVE PDF
+    ========================================================= */
+
+    pdf.save("attribute_table.pdf");
+
+});
